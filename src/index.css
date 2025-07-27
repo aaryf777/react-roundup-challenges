@@ -40,7 +40,7 @@ All colors MUST be HSL.
     --ring: 217 91% 60%;
 
     /* Code editor colors */
-    --code-bg: 220 13% 18%;
+    --code-bg: 220 15% 96%;
     --code-text: 220 15% 85%;
     --code-keyword: 217 91% 60%;
     --code-string: 142 76% 36%;
@@ -158,4 +158,29 @@ All colors MUST be HSL.
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
   }
+}
+
+/* Hide scrollbars for all browsers */
+@layer utilities {
+  .scrollbar-hide {
+    /* Firefox */
+    scrollbar-width: none;
+    /* IE and Edge */
+    -ms-overflow-style: none;
+  }
+  
+  .scrollbar-hide::-webkit-scrollbar {
+    /* Chrome, Safari and Opera */
+    display: none;
+  }
+}
+
+/* Global scrollbar hiding */
+* {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+*::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
 }
