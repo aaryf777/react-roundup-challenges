@@ -6,15 +6,9 @@ import { useFirestoreInit } from "@/hooks/useFirestoreInit";
 
 interface AppProvidersProps {
   children: ReactNode;
-  allChallenges: any[];
-  categories: any[];
 }
 
-export const AppProviders = ({
-  children,
-  allChallenges,
-  categories,
-}: AppProvidersProps) => {
+export const AppProviders = ({ children }: AppProvidersProps) => {
   const { isInitialized, error } = useFirestoreInit();
 
   if (!isInitialized) {
@@ -35,12 +29,7 @@ export const AppProviders = ({
   return (
     <ThemeProvider>
       <AuthProvider>
-        <ChallengesProvider
-          allChallenges={allChallenges}
-          categories={categories}
-        >
-          {children}
-        </ChallengesProvider>
+        <ChallengesProvider>{children}</ChallengesProvider>
       </AuthProvider>
     </ThemeProvider>
   );

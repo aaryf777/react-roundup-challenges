@@ -114,7 +114,7 @@ const Header = () => {
                 </DropdownMenuItem>
                 <DropdownMenuItem>
                   <span className="text-sm">
-                    Problems Solved: {user?.problemsSolved}
+                    Problems Solved: {user?.solvedProblems.length}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />

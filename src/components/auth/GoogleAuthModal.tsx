@@ -9,13 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { signInWithPopup, GoogleAuthProvider } from "firebase/auth";
 import { auth, googleProvider } from "@/lib/firebase";
-
-interface GoogleAuthModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onSuccess: (user: any) => void;
-  onError: (error: string) => void;
-}
+import type { GoogleAuthModalProps } from "./type";
 
 const GoogleAuthModal: React.FC<GoogleAuthModalProps> = ({
   isOpen,

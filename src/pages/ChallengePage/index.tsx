@@ -1,113 +1,65 @@
 import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
 import ChallengePage from "@/components/challenge";
+import { challengeService } from "@/lib/firestore";
+import { Challenge } from "@/contexts/ChallengesContext";
 
 const ChallengePageContainer = () => {
   const { id } = useParams<{ id: string }>();
+  const [challenge, setChallenge] = useState<Challenge | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Mock challenge data - in a real app, this would come from an API
-  const challenge = {
-    id: "two-sum",
-    title: "Two Sum",
-    description:
-      "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
-    content: `
-# Two Sum
+  useEffect(() => {
+    const fetchChallenge = async () => {
+      if (!id) return;
+      try {
+        setLoading(true);
+        console.log("id", id);
 
-Given an array of integers \`nums\` and an integer \`target\`, return *indices of the two numbers such that they add up to \`target\`*.
+        const challengeData = await challengeService.getChallenge(id);
+        if (challengeData) {
+          const functionNameMatch = (challengeData.starterCode || "").match(
+            /function\s+([a-zA-Z0-9_]+)\s*\(/
+          );
+          const functionName = functionNameMatch ? functionNameMatch[1] : "";
 
-You may assume that each input would have ***exactly one solution***, and you may not use the *same* element twice.
+          const transformedChallenge = {
+            ...challengeData,
+            timeEstimate: challengeData.estimatedTime,
+            solvedBy: challengeData.completions,
+            companies: challengeData.companyTags,
+            content: challengeData.description,
+            hints: [],
+            functionName,
+            testCases:
+              challengeData.testRunner === "memoize"
+                ? challengeData.testCases
+                : challengeData.testCases,
+            testRunner: challengeData.testRunner, // Ensure this is passed through
+          };
+          setChallenge(transformedChallenge as Challenge);
+        } else {
+          console.error("Challenge not found");
+        }
+      } catch (error) {
+        console.error("Error fetching challenge:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-You can return the answer in any order.
+    fetchChallenge();
+  }, [id]);
+  console.log("challenge", challenge);
+  if (loading) {
+    return <div>Loading...</div>;
+  }
 
-## Example 1:
+  if (!challenge) {
+    return <div>Challenge not found!</div>;
+  }
 
-\`\`\`
-Input: nums = [2,7,11,15], target = 9
-Output: [0,1]
-Explanation: Because nums[0] + nums[1] == 9, we return [0, 1].
-\`\`\`
-
-## Example 2:
-
-\`\`\`
-Input: nums = [3,2,4], target = 6
-Output: [1,2]
-\`\`\`
-
-## Example 3:
-
-\`\`\`
-Input: nums = [3,3], target = 6
-Output: [0,1]
-\`\`\`
-
-## Constraints:
-
-- \`2 <= nums.length <= 104\`
-- \`-109 <= nums[i] <= 109\`
-- \`-109 <= target <= 109\`
-- **Only one valid answer exists.**
-
-## Follow-up:
-
-Can you come up with an algorithm that is less than O(n²) time complexity?
-`,
-    hints: [
-      "Try using a hash map to store visited numbers.",
-      "Check if the complement exists before adding the current number.",
-      "Aim for O(n) time complexity.",
-    ],
-    difficulty: "easy" as const,
-    category: "arrays",
-    timeEstimate: "15 min",
-    solvedBy: 2547,
-    points: 10,
-    tags: ["Array", "Hash Table", "Two Pointers"],
-    companies: ["Google", "Microsoft", "Meta"],
-  };
-
-  const initialCode = `/**
- * @param {number[]} nums
- * @param {number} target
- * @return {number[]}
- */
-var twoSum = function(nums, target) {
-    // Write your solution here
-    
-};`;
-  const functionName = "twoSum";
-  const testCases = [
-    {
-      input: [[2, 7, 11, 15], 9],
-      expected: [0, 1],
-      description: "Basic case with solution",
-    },
-    {
-      input: [[3, 2, 4], 6],
-      expected: [1, 2],
-      description: "Solution in middle of array",
-    },
-    {
-      input: [[3, 3], 6],
-      expected: [0, 1],
-      description: "Same numbers",
-    },
-  ];
-
-  const handleSubmitSolution = () => {
-    // Handle solution submission
-    console.log("Submitting solution...");
-  };
-
-  return (
-    <ChallengePage
-      challenge={challenge}
-      initialCode={initialCode}
-      functionName={functionName}
-      testCases={testCases}
-      onSubmitSolution={handleSubmitSolution}
-    />
-  );
+  return <ChallengePage challenge={challenge} />;
 };
 
 export default ChallengePageContainer;

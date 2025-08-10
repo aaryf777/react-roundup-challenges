@@ -1,9 +1,5 @@
 import ChallengeCard from "./ChallengeCard";
-
-interface ChallengeGridProps {
-  visibleChallenges: any[];
-  handleChallengeClick: (challengeId: string) => void;
-}
+import type { ChallengeGridProps } from "./type";
 
 const ChallengeGrid = ({
   visibleChallenges,
@@ -17,12 +13,9 @@ const ChallengeGrid = ({
         style={{ animationDelay: `${index * 0.1}s` }}
       >
         <ChallengeCard
+          key={challenge.id}
           {...challenge}
-          onClick={() =>
-            handleChallengeClick(
-              `${challenge.title.toLowerCase().replace(/\s+/g, "-")}`
-            )
-          }
+          onClick={() => handleChallengeClick(challenge)}
         />
       </div>
     ))}

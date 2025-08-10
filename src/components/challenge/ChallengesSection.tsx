@@ -7,18 +7,24 @@ import DifficultyFilter from "@/components/filters/DifficultyFilter";
 import StatusFilter from "@/components/filters/StatusFilter";
 import { useChallenges } from "@/contexts/ChallengesContext";
 import { COMPANY_LIST, SORT_OPTIONS } from "@/constants/challenges";
-
-interface ChallengesSectionProps {
-  onChallengeClick: (challengeId: string) => void;
-  onLoadMore: () => void;
-}
+import type { ChallengesSectionProps } from "./type";
 
 const ChallengesSection = ({
   onChallengeClick,
   onLoadMore,
 }: ChallengesSectionProps) => {
-  const { state, dispatch, visibleChallenges, hasMore, categories } =
-    useChallenges();
+  const {
+    dispatch,
+    visibleChallenges,
+    hasMore,
+    categories,
+    selectedCompanies,
+    selectedCategory,
+    difficultyFilter,
+    selectedStatus,
+    searchQuery,
+    sortBy,
+  } = useChallenges();
 
   return (
     <section className="py-12">
@@ -28,26 +34,26 @@ const ChallengesSection = ({
           <div className="lg:col-span-1 space-y-6">
             <CompanyFilter
               companies={COMPANY_LIST}
-              selected={state.selectedCompanies}
+              selected={selectedCompanies}
               onChange={(companies) =>
                 dispatch({ type: "SET_SELECTED_COMPANIES", payload: companies })
               }
             />
             <CategoryFilter
               categories={categories}
-              selectedCategory={state.selectedCategory}
+              selectedCategory={selectedCategory}
               onCategoryChange={(category) =>
                 dispatch({ type: "SET_CATEGORY", payload: category })
               }
             />
             <DifficultyFilter
-              difficultyFilter={state.difficultyFilter}
+              difficultyFilter={difficultyFilter}
               setDifficultyFilter={(difficulty) =>
                 dispatch({ type: "SET_DIFFICULTY_FILTER", payload: difficulty })
               }
             />
             <StatusFilter
-              selectedStatus={state.selectedStatus}
+              selectedStatus={selectedStatus}
               setSelectedStatus={(status) =>
                 dispatch({ type: "SET_SELECTED_STATUS", payload: status })
               }
@@ -58,11 +64,11 @@ const ChallengesSection = ({
           <div className="lg:col-span-3 space-y-6">
             {/* Search and Filters */}
             <ChallengeSearchSortBar
-              searchQuery={state.searchQuery}
+              searchQuery={searchQuery}
               setSearchQuery={(query) =>
                 dispatch({ type: "SET_SEARCH_QUERY", payload: query })
               }
-              sortBy={state.sortBy}
+              sortBy={sortBy}
               setSortBy={(sort) =>
                 dispatch({ type: "SET_SORT_BY", payload: sort })
               }
@@ -72,10 +78,9 @@ const ChallengesSection = ({
             {/* Results Header */}
             <div className="flex items-center justify-between">
               <h2 className="text-2xl font-semibold">
-                {state.selectedCategory === "all"
+                {selectedCategory === "all"
                   ? "All Challenges"
-                  : categories.find((c) => c.id === state.selectedCategory)
-                      ?.name}
+                  : categories.find((c) => c.id === selectedCategory)?.name}
               </h2>
               <span className="text-muted-foreground">
                 {visibleChallenges.length} challenges
@@ -85,7 +90,7 @@ const ChallengesSection = ({
             {/* Challenge Cards */}
             <ChallengeGrid
               visibleChallenges={visibleChallenges}
-              handleChallengeClick={onChallengeClick}
+              handleChallengeClick={(challenge) => onChallengeClick(challenge.id)}
             />
 
             {/* Load More Button */}

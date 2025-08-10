@@ -16,18 +16,14 @@ import {
 import { auth, googleProvider } from "@/lib/firebase";
 import { userService, FirestoreUser } from "@/lib/firestore";
 
-interface User {
+interface User extends FirestoreUser {
   id: string;
-  username: string;
-  email: string;
-  points: number;
-  problemsSolved: number;
 }
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  isLoading: boolean;
+  loading: boolean;
   login: (
     email: string,
     password: string
@@ -59,7 +55,7 @@ interface AuthProviderProps {
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(true);
 
   // Listen for Firebase auth state changes
   useEffect(() => {
@@ -101,21 +97,16 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
             }
 
             // Convert Firestore user to our User interface
-            const user: User = {
-              id: firestoreUser!.uid,
-              username: firestoreUser!.username,
-              email: firestoreUser!.email,
-              points: firestoreUser!.points,
-              problemsSolved: firestoreUser!.problemsSolved,
-            };
-
-            setUser(user);
+            if (firestoreUser) {
+              setUser({ ...firestoreUser, id: firebaseUser.uid });
+            }
             localStorage.setItem("user", JSON.stringify(user));
           } catch (error) {
             console.error("Error handling user authentication:", error);
             // Fallback to basic user data
             const user: User = {
               id: firebaseUser.uid,
+              uid: firebaseUser.uid,
               username:
                 firebaseUser.displayName ||
                 firebaseUser.email?.split("@")[0] ||
@@ -123,6 +114,14 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
               email: firebaseUser.email || "",
               points: 0,
               problemsSolved: 0,
+              streak: 0,
+              longestStreak: 0,
+              solvedProblems: [],
+              submissions: [],
+              firstName: firebaseUser.displayName?.split(" ")[0] || "",
+              lastName: firebaseUser.displayName?.split(" ").slice(1).join(" ") || "",
+              createdAt: new Date(),
+              updatedAt: new Date(),
             };
             setUser(user);
             localStorage.setItem("user", JSON.stringify(user));
@@ -131,7 +130,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setUser(null);
           localStorage.removeItem("user");
         }
-        setIsLoading(false);
+        setLoading(false);
       }
     );
 
@@ -232,7 +231,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const value: AuthContextType = {
     user,
     isAuthenticated: !!user,
-    isLoading,
+    loading,
     login,
     register,
     logout,

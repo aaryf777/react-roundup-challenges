@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   DocumentData,
   QueryDocumentSnapshot,
+  increment,
 } from "firebase/firestore";
 import { db } from "./firebase";
 
@@ -22,6 +23,7 @@ export const COLLECTIONS = {
   CHALLENGES: "challenges",
   SUBMISSIONS: "submissions",
   LEADERBOARD: "leaderboard",
+  CATEGORIES: "categories",
 } as const;
 
 // User interface
@@ -42,22 +44,31 @@ export interface FirestoreUser {
 }
 
 // Challenge interface
-export interface FirestoreChallenge {
+export interface FirestoreChallenge extends DocumentData {
   id: string;
   title: string;
   description: string;
-  content: string;
   difficulty: "easy" | "medium" | "hard";
   category: string;
+  estimatedTime: number;
+  completions: number;
+  submissions: number;
   tags: string[];
-  companies: string[];
-  points: number;
-  timeEstimate: string;
-  solvedBy: number;
-  testCases: any[];
-  hints: string[];
+  companyTags: string[];
+  instructions: string;
+  starterCode: string;
+  solutionCode: string;
+  testCases: string;
   createdAt: any;
   updatedAt: any;
+  status: string;
+  createdBy: string;
+}
+
+// Category interface
+export interface FirestoreCategory {
+  id: string;
+  category: string;
 }
 
 // Submission interface
@@ -67,11 +78,12 @@ export interface FirestoreSubmission {
   challengeId: string;
   code: string;
   language: string;
-  status: "accepted" | "wrong_answer" | "time_limit_exceeded" | "runtime_error";
+  status: "accepted" | "wrong_answer" | "time_limit_exceeded" | "runtime_error" | "failed" | "partial_accepted";
   executionTime: number;
   memoryUsage: number;
   testCasesPassed: number;
   totalTestCases: number;
+  points?: number;
   submittedAt: any;
 }
 
@@ -140,6 +152,22 @@ export const userService = {
   },
 };
 
+// Category operations
+export const categoryService = {
+  // Get all categories
+  async getCategories(): Promise<FirestoreCategory[]> {
+    const q = query(collection(db, COLLECTIONS.CATEGORIES));
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as FirestoreCategory
+    );
+  },
+};
+
 // Challenge operations
 export const challengeService = {
   // Get all challenges
@@ -151,6 +179,7 @@ export const challengeService = {
         ({
           id: doc.id,
           ...doc.data(),
+          submissions: doc.data().submissions || 0,
         }) as FirestoreChallenge
     );
   },
@@ -164,6 +193,7 @@ export const challengeService = {
       return {
         id: challengeSnap.id,
         ...challengeSnap.data(),
+        submissions: challengeSnap.data().submissions || 0,
       } as FirestoreChallenge;
     }
     return null;
@@ -184,6 +214,7 @@ export const challengeService = {
         ({
           id: doc.id,
           ...doc.data(),
+          submissions: doc.data().submissions || 0,
         }) as FirestoreChallenge
     );
   },
@@ -203,25 +234,74 @@ export const challengeService = {
         ({
           id: doc.id,
           ...doc.data(),
+          submissions: doc.data().submissions || 0,
         }) as FirestoreChallenge
     );
   },
 };
 
 // Submission operations
-export const submissionService = {
+export interface SubmissionService {
+  createSubmission: (
+    userId: string,
+    challengeId: string,
+    submissionData: Omit<
+      FirestoreSubmission,
+      "id" | "submittedAt" | "userId" | "challengeId"
+    >
+  ) => Promise<string>;
+  getUserSubmissions: (userId: string) => Promise<FirestoreSubmission[]>;
+  getChallengeSubmissions: (
+    challengeId: string
+  ) => Promise<FirestoreSubmission[]>;
+  getUserChallengeSubmission: (
+    userId: string,
+    challengeId: string
+  ) => Promise<FirestoreSubmission | null>;
+  getAllSubmissions: () => Promise<FirestoreSubmission[]>;
+  getUserSubmissionsForChallenge: (
+    userId: string,
+    challengeId: string
+  ) => Promise<FirestoreSubmission[]>;
+}
+
+export const submissionService: SubmissionService = {
   // Create submission
   async createSubmission(
-    submissionData: Omit<FirestoreSubmission, "id" | "submittedAt">
+    userId: string,
+    challengeId: string,
+    submissionData: Omit<
+      FirestoreSubmission,
+      "id" | "submittedAt" | "userId" | "challengeId"
+    >
   ): Promise<string> {
-    const submissionRef = await addDoc(
+    // Create the submission document
+    const submissionPromise = addDoc(
       collection(db, COLLECTIONS.SUBMISSIONS),
       {
         ...submissionData,
+        userId,
+        challengeId,
         submittedAt: serverTimestamp(),
       }
     );
+
+    const submissionRef = await submissionPromise;
     return submissionRef.id;
+  },
+
+  // Get all submissions (for calculating counts)
+  async getAllSubmissions(): Promise<FirestoreSubmission[]> {
+    const querySnapshot = await getDocs(
+      collection(db, COLLECTIONS.SUBMISSIONS)
+    );
+    return querySnapshot.docs.map(
+      (doc) =>
+        ({
+          id: doc.id,
+          ...doc.data(),
+        }) as FirestoreSubmission
+    );
   },
 
   // Get user submissions
@@ -284,6 +364,48 @@ export const submissionService = {
       } as FirestoreSubmission;
     }
     return null;
+  },
+
+  // Get all of a user's submissions for a specific challenge
+  async getUserSubmissionsForChallenge(
+    userId: string,
+    challengeId: string
+  ): Promise<FirestoreSubmission[]> {
+    const q = query(
+      collection(db, COLLECTIONS.SUBMISSIONS),
+      where("userId", "==", userId),
+      where("challengeId", "==", challengeId),
+      orderBy("submittedAt", "desc")
+    );
+    console.log(" - ", q, "challengeId - ", challengeId);
+    try {
+      const querySnapshot = await getDocs(q);
+      console.log("querySnapshot - ", querySnapshot);
+      return querySnapshot.docs.map(
+        (doc) =>
+          ({
+            id: doc.id,
+            ...doc.data(),
+          }) as FirestoreSubmission
+      );
+    } catch (error: any) {
+      console.error(
+        "Failed to fetch user submissions for challenge:",
+        error.message
+      );
+      if (
+        error.code === "failed-precondition" &&
+        error.message.includes("create it here")
+      ) {
+        const match = error.message.match(
+          /https:\/\/console\.firebase\.google\.com\/[^\s]+/
+        );
+        if (match) {
+          console.error("👉 Create the required index here:", match[0]);
+        }
+      }
+      return [];
+    }
   },
 };
 

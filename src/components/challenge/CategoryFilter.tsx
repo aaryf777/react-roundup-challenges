@@ -1,13 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-
-interface Category {
-  id: string;
-  name: string;
-  count: number;
-  icon: string;
-}
+import { Category } from "@/contexts/ChallengesContext";
+import { LayoutGrid, Code, BrainCircuit } from "lucide-react";
 
 interface CategoryFilterProps {
   categories: Category[];
@@ -15,7 +10,22 @@ interface CategoryFilterProps {
   onCategoryChange: (categoryId: string) => void;
 }
 
-const CategoryFilter = ({ categories, selectedCategory, onCategoryChange }: CategoryFilterProps) => {
+const getCategoryIcon = (categoryName: string) => {
+  switch (categoryName.toLowerCase()) {
+    case "algorithm":
+      return <BrainCircuit className="h-5 w-5" />;
+    case "output based":
+      return <Code className="h-5 w-5" />;
+    default:
+      return <LayoutGrid className="h-5 w-5" />;
+  }
+};
+
+const CategoryFilter = ({
+  categories,
+  selectedCategory,
+  onCategoryChange,
+}: CategoryFilterProps) => {
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-semibold">Categories</h3>
@@ -34,7 +44,7 @@ const CategoryFilter = ({ categories, selectedCategory, onCategoryChange }: Cate
             {categories.reduce((sum, cat) => sum + cat.count, 0)}
           </Badge>
         </Button>
-        
+
         {categories.map((category) => (
           <Button
             key={category.id}
@@ -45,11 +55,8 @@ const CategoryFilter = ({ categories, selectedCategory, onCategoryChange }: Cate
             )}
             onClick={() => onCategoryChange(category.id)}
           >
-            <span className="mr-2">{category.icon}</span>
             <span className="flex-1 text-left">{category.name}</span>
-            <Badge variant="secondary" className="ml-auto">
-              {category.count}
-            </Badge>
+            <span className="mr-2">{getCategoryIcon(category.name)}</span>
           </Button>
         ))}
       </div>

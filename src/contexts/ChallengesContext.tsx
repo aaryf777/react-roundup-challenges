@@ -1,24 +1,53 @@
-import { createContext, useContext, useReducer, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useReducer,
+  ReactNode,
+  useEffect,
+  useState,
+} from "react";
+import {
+  challengeService,
+  categoryService,
+  submissionService,
+  FirestoreChallenge,
+  FirestoreCategory,
+  FirestoreSubmission,
+} from "@/lib/firestore";
 import { CHALLENGES_PER_PAGE } from "@/constants/challenges";
+import { useAuth } from "@/contexts/AuthContext";
 
 // Types
 export interface Challenge {
+  id: string;
   title: string;
   description: string;
   difficulty: "easy" | "medium" | "hard";
   category: string;
-  timeEstimate: string;
-  solvedBy: number;
-  points: number;
+  timeEstimate: number;
+  solvedBy: number; // Mapped from 'completions'
+  points?: number;
   tags: string[];
-  companies: string[];
+  companies: string[]; // Mapped from 'companyTags'
+  instructions: string;
+  starterCode: string;
+  solutionCode: string;
+  testCases: any[] | string; // Can be a string for special runners
+  submissions: number;
+  createdAt: any;
+  updatedAt: any;
+  status: string;
+  createdBy: string;
+  content: string;
+  hints: string[];
+  functionName: string;
 }
 
 export interface Category {
   id: string;
-  name: string;
-  count: number;
-  icon: string;
+  name: string; // Mapped from 'category'
+  count?: number;
+  icon?: string;
 }
 
 // State interface
@@ -90,8 +119,8 @@ function challengesReducer(
 }
 
 // Context interface
-interface ChallengesContextType {
-  state: ChallengesState;
+interface ChallengesContextType extends ChallengesState {
+  allChallenges: Challenge[];
   dispatch: React.Dispatch<ChallengesAction>;
   scrollToChallenges: () => void;
   filteredChallenges: Challenge[];
@@ -108,15 +137,92 @@ const ChallengesContext = createContext<ChallengesContextType | undefined>(
 // Provider component
 interface ChallengesProviderProps {
   children: ReactNode;
-  allChallenges: Challenge[];
-  categories: Category[];
 }
 
-export const ChallengesProvider = ({
-  children,
-  allChallenges,
-  categories,
-}: ChallengesProviderProps) => {
+export const ChallengesProvider = ({ children }: ChallengesProviderProps) => {
+  const [allChallenges, setAllChallenges] = useState<Challenge[]>([]);
+  const [allSubmissions, setAllSubmissions] = useState<FirestoreSubmission[]>(
+    []
+  );
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  console.log("allChallenges", allChallenges);
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [challengesData, categoriesData, submissionsData] =
+          await Promise.all([
+            challengeService.getChallenges(),
+            categoryService.getCategories(),
+            submissionService.getAllSubmissions(),
+          ]);
+        console.log("challengesData", challengesData);
+        setAllSubmissions(submissionsData);
+
+        // Calculate submission counts for each challenge
+        const submissionCounts = submissionsData.reduce(
+          (acc, sub) => {
+            acc[sub.challengeId] = (acc[sub.challengeId] || 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+
+        const transformedChallenges = challengesData.map(
+          (c: FirestoreChallenge) => {
+            const functionNameMatch = (c.starterCode || "").match(
+              /function\s+([a-zA-Z0-9_]+)\s*\(/
+            );
+            const functionName = functionNameMatch ? functionNameMatch[1] : "";
+
+            return {
+              ...c,
+              timeEstimate: c.estimatedTime,
+              solvedBy: c.completions,
+              points: c.points || 0,
+              submissions: submissionCounts[c.id] || 0,
+              companies: c.companyTags,
+              content: c.description,
+              hints: [],
+              functionName,
+              testCases: c.testCases, // All challenges now provide a runnable script.
+            };
+          }
+        );
+        console.log("transformedChallenges", transformedChallenges);
+        const categoryCounts = transformedChallenges.reduce(
+          (acc, challenge) => {
+            const categoryId = challenge.category
+              .toLowerCase()
+              .replace(/\s+/g, "-");
+            acc[categoryId] = (acc[categoryId] || 0) + 1;
+            return acc;
+          },
+          {} as Record<string, number>
+        );
+
+        const transformedCategories = categoriesData.map(
+          (c: FirestoreCategory) => ({
+            id: c.id,
+            name: c.category,
+            count: categoryCounts[c.id] || 0,
+          })
+        );
+
+        setAllChallenges(transformedChallenges as Challenge[]);
+        setCategories(transformedCategories as Category[]);
+      } catch (err) {
+        console.error("Error fetching data:", err);
+        setError("Failed to load challenges. Please try again later.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchData();
+  }, []);
   const [state, dispatch] = useReducer(challengesReducer, initialState);
 
   // Scroll to challenges function
@@ -147,11 +253,15 @@ export const ChallengesProvider = ({
         challenge.companies.some((c: string) =>
           state.selectedCompanies.includes(c)
         ));
-    const isSolved = Math.random() > 0.6; // 40% chance of being solved (mock)
+    const userSubmissions = allSubmissions.filter((s) => s.userId === user?.id);
+    const challengeStatus = userSubmissions.find(
+      (s) => s.challengeId === challenge.id
+    )?.status;
+
     const matchesStatus =
       state.selectedStatus.length === 0 ||
-      (state.selectedStatus.includes("solved") && isSolved) ||
-      (state.selectedStatus.includes("unsolved") && !isSolved);
+      (state.selectedStatus.includes("unsolved") && !challengeStatus) ||
+      (challengeStatus && state.selectedStatus.includes(challengeStatus));
 
     return (
       matchesCategory &&
@@ -164,10 +274,25 @@ export const ChallengesProvider = ({
 
   // Sort challenges
   let sortedChallenges = [...filteredChallenges];
-  if (state.sortBy === "solved-desc") {
-    sortedChallenges = sortedChallenges.sort((a, b) => b.solvedBy - a.solvedBy);
-  } else if (state.sortBy === "solved-asc") {
-    sortedChallenges = sortedChallenges.sort((a, b) => a.solvedBy - b.solvedBy);
+  switch (state.sortBy) {
+    case "latest":
+      sortedChallenges.sort(
+        (a, b) =>
+          new Date(b.createdAt.seconds * 1000).getTime() -
+          new Date(a.createdAt.seconds * 1000).getTime()
+      );
+      break;
+    case "most-solved":
+      sortedChallenges.sort((a, b) => b.solvedBy - a.solvedBy);
+      break;
+    case "solved-asc":
+      sortedChallenges.sort((a, b) => a.solvedBy - b.solvedBy);
+      break;
+    case "solved-desc":
+      sortedChallenges.sort((a, b) => b.solvedBy - a.solvedBy);
+      break;
+    default:
+      break;
   }
 
   // Get visible challenges
@@ -175,7 +300,8 @@ export const ChallengesProvider = ({
   const hasMore = state.visibleCount < sortedChallenges.length;
 
   const value: ChallengesContextType = {
-    state,
+    ...state,
+    allChallenges,
     dispatch,
     scrollToChallenges,
     filteredChallenges: sortedChallenges,
@@ -183,6 +309,27 @@ export const ChallengesProvider = ({
     hasMore,
     categories,
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading Challenges...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-destructive">{error}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <ChallengesContext.Provider value={value}>

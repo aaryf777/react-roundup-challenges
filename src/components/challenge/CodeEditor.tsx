@@ -1,349 +1,513 @@
-import { useState, useEffect, useImperativeHandle, forwardRef } from "react";
+// CodeEditor.tsx
+import React, { useState, useEffect, useCallback, memo } from "react";
 import MonacoEditor from "@monaco-editor/react";
 import prettier from "prettier/standalone";
 import parserBabel from "prettier/parser-babel";
-import { Button } from "@/components/ui/button";
-import { Play, RotateCcw, Download, Maximize2, Minimize2 } from "lucide-react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useTheme } from "@/contexts/ThemeContext";
-import React from "react";
+import { Button } from "../ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { Badge } from "../ui/badge";
+import { useToast } from "../ui/use-toast";
+import {
+  Play,
+  RotateCcw,
+  CheckCircle,
+  XCircle,
+  Maximize2,
+  Minimize2,
+} from "lucide-react";
+import { Challenge } from "../../contexts/ChallengesContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { submissionService } from "../../lib/firestore";
+import { useTheme } from "../../contexts/ThemeContext";
 
-interface CodeEditorProps {
-  initialCode?: string;
-  language?: string;
-  readOnly?: boolean;
-  testCases?: Array<{ input: any[]; expected: any }>;
-  functionName?: string;
-  hideRunButton?: boolean;
-  onCodeChange?: (code: string) => void;
-  output?: string;
-  consoleLogs?: string[];
-  onRun?: () => void;
-  onSubmit?: () => void;
+interface RunResult {
+  name: string;
+  status: "success" | "failure" | "error";
+  message?: string;
 }
 
-export type CodeEditorHandle = {
-  setActiveTab: (tab: string) => void;
-  getActiveTab: () => string;
-};
+interface WorkerOutput {
+  results: RunResult[];
+  logs: string[];
+  executionTime: number;
+  testCasesPassed: number;
+  totalTestCases: number;
+}
 
-const CodeEditor = forwardRef<CodeEditorHandle, CodeEditorProps>(
-  (
-    {
-      initialCode = "// Write your solution here\nfunction solution() {\n  \n}",
-      language = "javascript",
-      readOnly = false,
-      testCases = [],
-      functionName = "solution",
-      hideRunButton = false,
-      onCodeChange,
-      output: externalOutput,
-      consoleLogs: externalConsoleLogs,
-      onRun,
-      onSubmit,
-    },
-    ref
-  ) => {
-    const [code, setCode] = useState(initialCode);
-    const [internalOutput, setInternalOutput] = useState("");
-    const [internalConsoleLogs, setInternalConsoleLogs] = useState<string[]>(
-      []
-    );
-    const { theme } = useTheme();
+interface CodeEditorProps {
+  challenge: Challenge;
+  onCodeChange: (newCode: string) => void;
+  code: string;
+  onSubmit?: (submission: any) => Promise<void>;
+}
 
-    // Use external output/logs if provided, otherwise use internal state
-    const output =
-      externalOutput !== undefined ? externalOutput : internalOutput;
-    const consoleLogs =
-      externalConsoleLogs !== undefined
-        ? externalConsoleLogs
-        : internalConsoleLogs;
+const CodeEditor: React.FC<CodeEditorProps> = memo(
+  ({ challenge, onCodeChange, code, onSubmit }) => {
+    const [output, setOutput] = useState<RunResult[]>([]);
+    const [consoleLogs, setConsoleLogs] = useState<string[]>([]);
     const [isRunning, setIsRunning] = useState(false);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [activeTab, setActiveTab] = useState("code");
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [lastRunDetails, setLastRunDetails] = useState<{
+      testCasesPassed: number;
+      totalTestCases: number;
+      executionTime: number;
+    } | null>(null);
 
-    // ESC key handler for fullscreen exit
-    useEffect(() => {
-      if (!isFullscreen) return;
-      const handleEsc = (e: KeyboardEvent) => {
-        if (e.key === "Escape") setIsFullscreen(false);
-      };
-      window.addEventListener("keydown", handleEsc);
-      return () => window.removeEventListener("keydown", handleEsc);
-    }, [isFullscreen]);
-
-    useImperativeHandle(ref, () => ({
-      setActiveTab,
-      getActiveTab: () => activeTab,
-    }));
+    const { user } = useAuth();
+    const { toast } = useToast();
+    const { theme } = useTheme();
 
     const handleCodeChange = (value: string | undefined) => {
-      const newCode = value || "";
-      setCode(newCode);
-      onCodeChange?.(newCode);
+      onCodeChange(value || "");
     };
 
-    // Get Monaco theme based on app theme
-    const monacoTheme = theme === "dark" ? "vs-dark" : "vs-dark";
+    useEffect(() => {
+      const handleKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape" && isFullscreen) {
+          setIsFullscreen(false);
+        }
+      };
+      window.addEventListener("keydown", handleKeyDown);
+      return () => {
+        window.removeEventListener("keydown", handleKeyDown);
+      };
+    }, [isFullscreen]);
 
-    const handleFormat = async () => {
-      try {
-        const formatted = await prettier.format(code, {
-          parser: "babel",
-          plugins: [parserBabel],
-          singleQuote: true,
-          semi: true,
+    /**
+     * runCode
+     * - Spawns a worker and posts code + testCode
+     * - Accepts worker messages of either:
+     *    { type: 'result', payload: WorkerOutput }
+     *    or the older/unwrapped shape: WorkerOutput directly
+     * - Rejects on timeout or worker errors
+     */
+    const runCode = useCallback(
+      (testCode: string): Promise<WorkerOutput> => {
+        return new Promise((resolve, reject) => {
+          const workerPath = "../../workers/code-runner.ts";
+          const worker = new Worker(new URL(workerPath, import.meta.url));
+          let settled = false;
+
+          const cleanup = () => {
+            try {
+              worker.terminate();
+            } catch {
+              // ignore
+            }
+          };
+
+          const timeout = setTimeout(() => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(new Error("Code execution timed out after 10 seconds."));
+          }, 10000);
+
+          worker.onmessage = (e: MessageEvent) => {
+            if (settled) return;
+            // Worker might send { type: 'result', payload } or direct payload
+            const data = e.data as any;
+
+            // If worker posts error type
+            if (data && data.type === "error") {
+              settled = true;
+              clearTimeout(timeout);
+              cleanup();
+              const errMsg = data.payload?.message || "Worker error";
+              reject(new Error(errMsg));
+              return;
+            }
+
+            // Normalize payload
+            const payload: any =
+              data && data.type === "result" && data.payload
+                ? data.payload
+                : data;
+
+            // Validate payload shape
+            if (
+              !payload ||
+              !("results" in payload) ||
+              !("logs" in payload) ||
+              !("executionTime" in payload)
+            ) {
+              // Unexpected shape — return as error
+              settled = true;
+              clearTimeout(timeout);
+              cleanup();
+              reject(
+                new Error(
+                  "Unexpected worker response shape. See console for details."
+                )
+              );
+              return;
+            }
+
+            settled = true;
+            clearTimeout(timeout);
+            cleanup();
+
+            // Ensure arrays/defaults
+            const normalized: WorkerOutput = {
+              results: Array.isArray(payload.results) ? payload.results : [],
+              logs: Array.isArray(payload.logs) ? payload.logs : [],
+              executionTime: Number(payload.executionTime) || 0,
+              testCasesPassed: Number(payload.testCasesPassed) || 0,
+              totalTestCases: Number(payload.totalTestCases) || 0,
+            };
+            resolve(normalized);
+          };
+
+          worker.onerror = (err: ErrorEvent | any) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            cleanup();
+            // err.message sometimes missing for ErrorEvent
+            const message =
+              (err && err.message) ||
+              (err && err.error && err.error.message) ||
+              "Worker runtime error";
+            reject(new Error(message));
+          };
+
+          // Post the payload. For promise-based tests, the worker should
+          // be wrapping test execution in an async IIFE (worker responsibility).
+          worker.postMessage({
+            code,
+            testCode,
+            functionName: challenge.functionName,
+          });
         });
-        setCode(formatted);
-      } catch (err) {
-        setInternalOutput(
-          "❌ Error formatting code: " + (err as Error).message
-        );
-        setActiveTab("output");
-      }
-    };
+      },
+      [code, challenge.functionName]
+    );
 
     const handleRun = async () => {
       setIsRunning(true);
-      setInternalConsoleLogs([]);
-      let logs: string[] = [];
-
-      const customConsole = {
-        log: (...args: any[]) => {
-          logs.push(
-            args
-              .map((a) => (typeof a === "string" ? a : JSON.stringify(a)))
-              .join(" ")
-          );
-        },
-      };
-
-      const originalConsoleLog = console.log;
-      console.log = customConsole.log; // globally override
-
-      let results: string[] = [];
-      let allPassed = true;
-      let execTime = 0;
-      let memUsage: string = "-";
-
+      setActiveTab("output");
       try {
-        const runner = new Function(
-          "testCases",
-          "console",
-          `"use strict";
-        ${code}
-        return (async () => {
-          const results = [];
-          const fn = typeof ${functionName} === 'function' ? ${functionName} : globalThis['${functionName}'];
-          for (let i = 0; i < testCases.length; i++) {
-            const { input, expected } = testCases[i];
-            let got, pass;
-            try {
-              got = fn(...input);
-              if (got && typeof got.then === 'function') {
-                got = await got;
-              }
-              pass = JSON.stringify(got) === JSON.stringify(expected);
-            } catch (err) {
-              got = String(err);
-              pass = false;
-            }
-            results.push({ got, pass, expected });
-          }
-          return results;
-        })();`
+        // testCode should be a JS string (describe/test/expect...). If your challenge test cases
+        // are stored as structured objects, convert them into a JS test string upstream.
+        const testCode =
+          typeof challenge.testCases === "string"
+            ? challenge.testCases
+            : // If non-string, fallback to empty string (worker should handle)
+              "";
+
+        const {
+          results,
+          logs,
+          executionTime,
+          testCasesPassed,
+          totalTestCases,
+        } = await runCode(testCode);
+
+        setOutput(results);
+        setConsoleLogs(logs || []);
+        setLastRunDetails({
+          testCasesPassed,
+          totalTestCases,
+          executionTime,
+        });
+      } catch (error: unknown) {
+        console.error("Run error:", error);
+        const errorMessage =
+          error instanceof Error ? error.message : "An unknown error occurred.";
+        const errorResults = (error as any)?.results || [
+          { name: "Execution Error", status: "error", message: errorMessage },
+        ];
+        const errorLogs = (error as any)?.logs || [errorMessage];
+
+        setOutput(errorResults);
+        setConsoleLogs(
+          Array.isArray(errorLogs) ? errorLogs.flat() : [String(errorLogs)]
         );
-
-        const start = performance.now();
-        const runResults = await runner(testCases, customConsole);
-        execTime = Math.round(performance.now() - start);
-
-        for (let i = 0; i < runResults.length; i++) {
-          const { got, pass, expected } = runResults[i];
-          if (!pass) allPassed = false;
-          results.push(
-            `Test Case ${i + 1}: ${pass ? "✅" : "❌"} Expected: ${JSON.stringify(expected)}, Got: ${JSON.stringify(got)}`
-          );
-        }
-
-        if (window.performance && (performance as any).memory) {
-          memUsage = (
-            (performance as any).memory.usedJSHeapSize /
-            1024 /
-            1024
-          ).toFixed(1);
-        }
-      } catch (err: any) {
-        results.push(`❌ Error during execution: ${err.message}`);
-        allPassed = false;
       } finally {
-        console.log = originalConsoleLog; // restore original
+        setIsRunning(false);
+      }
+    };
+
+    const handleSubmit = async () => {
+      if (!user) {
+        toast({
+          title: "Authentication Required",
+          description: "You must be logged in to submit a solution.",
+          variant: "destructive",
+        });
+        return;
       }
 
-      setInternalOutput(
-        `${allPassed ? "✅ All test cases passed!" : "❌ Some test cases failed."}\n\n${results.join(
-          "\n"
-        )}\n\nExecution time: ${execTime}ms\nMemory usage: ${memUsage}MB`
-      );
-      setInternalConsoleLogs([...logs]);
+      setIsSubmitting(true);
       setActiveTab("output");
-      setIsRunning(false);
+
+      try {
+        const testCode =
+          typeof challenge.testCases === "string" ? challenge.testCases : "";
+
+        const {
+          results,
+          logs,
+          executionTime,
+          testCasesPassed,
+          totalTestCases,
+        } = await runCode(testCode);
+
+        setOutput(results);
+        setConsoleLogs(logs || []);
+        setLastRunDetails({
+          testCasesPassed,
+          totalTestCases,
+          executionTime,
+        });
+
+        let status: "accepted" | "failed" | "partial_accepted";
+        if (testCasesPassed === totalTestCases && totalTestCases > 0) {
+          status = "accepted";
+        } else if (testCasesPassed === 0) {
+          status = "failed";
+        } else {
+          status = "partial_accepted";
+        }
+
+        const points =
+          totalTestCases > 0
+            ? Math.round((challenge.points / totalTestCases) * testCasesPassed)
+            : 0;
+
+        const submissionData = {
+          userId: user.id,
+          challengeId: challenge.id,
+          code,
+          language: "javascript",
+          status,
+          executionTime,
+          memoryUsage: 0,
+          testCasesPassed,
+          totalTestCases,
+          points,
+        };
+
+        if (onSubmit) {
+          await onSubmit(submissionData);
+        } else {
+          const { userId, challengeId, ...restOfData } = submissionData;
+          await submissionService.createSubmission(
+            userId,
+            challengeId,
+            restOfData as any
+          );
+        }
+
+        toast({
+          title: "Submission Successful!",
+          description: "Your solution has been submitted and saved.",
+        });
+      } catch (error: unknown) {
+        console.error("Submission error:", error);
+        const errorMessage =
+          error instanceof Error
+            ? error.message
+            : "An unknown submission error occurred.";
+        const errorResults = (error as any)?.results || [
+          { name: "Submission Error", status: "error", message: errorMessage },
+        ];
+        const errorLogs = (error as any)?.logs || [errorMessage];
+
+        setOutput(errorResults);
+        setConsoleLogs(
+          Array.isArray(errorLogs) ? errorLogs.flat() : [String(errorLogs)]
+        );
+        toast({
+          title: "Submission Failed",
+          description: errorMessage || "An error occurred during submission.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsSubmitting(false);
+      }
     };
 
     const handleReset = () => {
-      setCode(initialCode);
-      setInternalOutput("");
+      onCodeChange(challenge.starterCode);
+      setOutput([]);
+      setConsoleLogs([]);
+      setLastRunDetails(null);
+      setActiveTab("code");
     };
 
-    return (
-      <div className="space-y-4 h-full">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="text-sm font-medium">Language:</span>
-            <span className="text-sm text-muted-foreground capitalize">
-              {language}
-            </span>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              <RotateCcw className="h-4 w-4 mr-1" />
-              Reset
-            </Button>
-            <Button variant="outline" size="sm">
-              <Download className="h-4 w-4 mr-1" />
-              Export
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleFormat}>
-              Format
-            </Button>
-            {!hideRunButton && (
-              <Button
-                id="run-code-btn"
-                size="sm"
-                onClick={handleRun}
-                disabled={isRunning}
-                className="bg-gradient-primary hover:shadow-glow"
-              >
-                <Play className="h-4 w-4 mr-1" />
-                {isRunning ? "Running..." : "Run Code"}
-              </Button>
-            )}
-          </div>
-        </div>
+    const handleFormat = async () => {
+      try {
+        const formattedCode = await prettier.format(code, {
+          parser: "babel",
+          plugins: [parserBabel],
+          semi: true,
+          singleQuote: false,
+        });
+        onCodeChange(formattedCode);
+      } catch (error) {
+        console.error("Failed to format code:", error);
+      }
+    };
 
+    const monacoTheme = theme === "dark" ? "vs-dark" : "light";
+
+    return (
+      <div
+        className={`flex flex-col h-full ${
+          isFullscreen ? "fixed inset-0 z-50 bg-background" : ""
+        }`}
+      >
         <Tabs
-          defaultValue="code"
-          className="space-y-4"
           value={activeTab}
           onValueChange={setActiveTab}
+          className="flex-grow flex flex-col"
         >
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="code">Code Editor</TabsTrigger>
-            <TabsTrigger value="output">Output & Tests</TabsTrigger>
-            <TabsTrigger value="console">Console</TabsTrigger>
-          </TabsList>
+          <div className="flex justify-between items-center p-2 border-b border-border">
+            <TabsList>
+              <TabsTrigger value="code">Code</TabsTrigger>
+              <TabsTrigger value="output">Output</TabsTrigger>
+              <TabsTrigger value="console">Console</TabsTrigger>
+            </TabsList>
+            <div className="flex items-center space-x-2">
+              <Button variant="outline" size="sm" onClick={handleReset}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Reset
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleFormat}>
+                Format
+              </Button>
+              <Button
+                onClick={handleRun}
+                disabled={isRunning}
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                <Play className="h-4 w-4 mr-2" />
+                {isRunning ? "Running..." : "Run"}
+              </Button>
+              <Button
+                onClick={handleSubmit}
+                disabled={isSubmitting || isRunning}
+                size="sm"
+                className="bg-green-600 hover:bg-green-700 text-white"
+              >
+                {isSubmitting ? "Submitting..." : "Submit"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsFullscreen(!isFullscreen)}
+              >
+                {isFullscreen ? (
+                  <Minimize2 className="h-4 w-4" />
+                ) : (
+                  <Maximize2 className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
 
-          <TabsContent value="code" className="space-y-0">
-            <div
-              className={
-                isFullscreen
-                  ? "fixed inset-0 z-50 bg-background flex flex-col"
-                  : "relative"
-              }
-            >
-              <div className="absolute top-2 right-2 flex items-center space-x-2 z-10">
-                <button
-                  onClick={() => setIsFullscreen((f) => !f)}
-                  className="p-1 rounded hover:bg-muted border border-border"
-                  title={
-                    isFullscreen ? "Exit Fullscreen" : "Expand to Fullscreen"
-                  }
-                >
-                  {isFullscreen ? (
-                    <Minimize2 className="w-4 h-4" />
-                  ) : (
-                    <Maximize2 className="w-4 h-4" />
-                  )}
-                </button>
-                <span className="text-xs text-muted-foreground">
-                  Lines: {code.split("\n").length}
-                </span>
-              </div>
+          <div className="flex-grow overflow-auto">
+            <TabsContent value="code" className="h-full m-0">
               <MonacoEditor
-                height={isFullscreen ? "calc(100vh - 120px)" : "600px"}
-                defaultLanguage={language}
+                height="100%"
+                language="javascript"
+                theme={monacoTheme}
                 value={code}
                 onChange={handleCodeChange}
-                theme={monacoTheme}
                 options={{
-                  readOnly,
-                  fontSize: 14,
-                  fontFamily:
-                    "JetBrains Mono, Fira Code, Cascadia Code, monospace",
                   minimap: { enabled: false },
+                  fontSize: 14,
                   wordWrap: "on",
-                  automaticLayout: true,
-                  autoClosingBrackets: "always",
-                  autoIndent: "full",
-                  formatOnType: true,
-                  formatOnPaste: true,
-                  suggestOnTriggerCharacters: true,
-                  tabSize: 2,
                 }}
               />
-              {/* Run/Submit buttons in fullscreen */}
-              {isFullscreen && (
-                <div className="flex justify-end space-x-2 mt-2 px-6 pb-6">
-                  <Button
-                    className="w-28 bg-gradient-primary hover:shadow-glow"
-                    onClick={() => {
-                      setIsFullscreen(false);
-                      onRun?.();
-                    }}
-                  >
-                    <Play className="h-4 w-4 mr-1" />
-                    Run
-                  </Button>
-                  <Button
-                    className="w-28 bg-gradient-primary hover:shadow-glow"
-                    onClick={() => {
-                      setIsFullscreen(false);
-                      onSubmit?.();
-                    }}
-                  >
-                    Submit
-                  </Button>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          <TabsContent value="output" className="space-y-0">
-            <div className="h-[600px] p-4 bg-code-bg text-code-text border border-border rounded-md overflow-auto">
-              {output ? (
-                <pre className="text-sm font-mono whitespace-pre-wrap">
-                  {output}
-                </pre>
+            <TabsContent value="output" className="p-4 h-full overflow-auto">
+              {isRunning ? (
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-muted-foreground">Running tests...</p>
+                </div>
+              ) : output?.length > 0 ? (
+                <>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold">Results</h3>
+                    {lastRunDetails && (
+                      <div className="text-sm text-muted-foreground">
+                        <span>
+                          {lastRunDetails.testCasesPassed} /{" "}
+                          {lastRunDetails.totalTestCases} tests passed
+                        </span>
+                        <span className="mx-2">|</span>
+                        <span>
+                          {(lastRunDetails.executionTime / 1000).toFixed(2)}s
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    {output.map((result, index) => (
+                      <div
+                        key={index}
+                        className="p-3 border rounded-md bg-muted/50"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center">
+                            {result.status === "success" ? (
+                              <CheckCircle className="h-5 w-5 text-green-500 mr-2" />
+                            ) : (
+                              <XCircle className="h-5 w-5 text-red-500 mr-2" />
+                            )}
+                            <p className="font-semibold text-sm">
+                              {result.name}
+                            </p>
+                          </div>
+                          <Badge
+                            variant={
+                              result.status === "success"
+                                ? "default"
+                                : "destructive"
+                            }
+                            className={
+                              result.status === "success"
+                                ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200"
+                                : ""
+                            }
+                          >
+                            {result.status.toUpperCase()}
+                          </Badge>
+                        </div>
+                        {(result.status === "failure" ||
+                          result.status === "error") &&
+                          result.message && (
+                            <pre className="mt-2 text-xs bg-background p-2 rounded-md whitespace-pre-wrap text-red-500 dark:text-red-400">
+                              {result.message}
+                            </pre>
+                          )}
+                      </div>
+                    ))}
+                  </div>
+                </>
               ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <p>Run your code to see the output and test results</p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-muted-foreground">
+                    Run code to see the output here.
+                  </p>
                 </div>
               )}
-            </div>
-          </TabsContent>
-          <TabsContent value="console" className="space-y-0">
-            <div className="h-[600px] p-4 bg-code-bg text-code-text border border-border rounded-md overflow-auto">
-              {consoleLogs.length > 0 ? (
-                <pre className="text-sm font-mono whitespace-pre-wrap">
-                  {consoleLogs.join("\n")}
-                </pre>
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  <p>No console output yet</p>
-                </div>
-              )}
-            </div>
-          </TabsContent>
+            </TabsContent>
+
+            <TabsContent value="console" className="p-4 h-full bg-muted/50">
+              <pre className="text-sm whitespace-pre-wrap">
+                {consoleLogs.length > 0
+                  ? consoleLogs.join("\n")
+                  : "Console output will appear here."}
+              </pre>
+            </TabsContent>
+          </div>
         </Tabs>
       </div>
     );

@@ -1,44 +1,87 @@
 import { useState } from "react";
-import { submissionService, FirestoreSubmission } from "@/lib/firestore";
+import {
+  submissionService,
+  userService,
+  FirestoreSubmission,
+  FirestoreUser,
+} from "@/lib/firestore";
 import { useAuth } from "@/contexts/AuthContext";
 
 export const useSubmissions = () => {
   const { user } = useAuth();
+  const [submissions, setSubmissions] = useState<FirestoreSubmission[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const createSubmission = async (
-    challengeId: string,
-    code: string,
-    language: string = "javascript",
-    status: FirestoreSubmission["status"],
-    executionTime: number,
-    memoryUsage: number,
-    testCasesPassed: number,
-    totalTestCases: number
+    submissionData: Omit<FirestoreSubmission, "id" | "submittedAt" | "points">
   ) => {
     if (!user) {
       throw new Error("User must be authenticated to submit solutions");
     }
 
+    setLoading(true);
+    setError(null);
+
     try {
-      setLoading(true);
-      setError(null);
+      // 1. Get previous submissions for this challenge
+      const previousSubmissions =
+        await submissionService.getUserSubmissionsForChallenge(
+          user.id,
+          submissionData.challengeId
+        );
 
-      const submissionData = {
-        userId: user.id,
-        challengeId,
-        code,
-        language,
-        status,
-        executionTime,
-        memoryUsage,
-        testCasesPassed,
-        totalTestCases,
-      };
+      // 2. Find the best previous score
+      const bestPreviousScore = previousSubmissions.reduce(
+        (max, sub) => Math.max(max, sub.testCasesPassed),
+        0
+      );
 
-      const submissionId =
-        await submissionService.createSubmission(submissionData);
+      // 3. Calculate newly passed test cases
+      const newlyPassedTestCases = Math.max(
+        0,
+        submissionData.testCasesPassed - bestPreviousScore
+      );
+
+      // 4. Calculate points to award (e.g., 10 points per new test case)
+      const pointsToAdd = newlyPassedTestCases;
+
+      // 5. Update user's total points if they earned any
+      if (pointsToAdd > 0) {
+        const currentUser = await userService.getUser(user.id);
+        if (currentUser) {
+          const updatedUserData: Partial<FirestoreUser> = {
+            points: currentUser.points + pointsToAdd,
+          };
+
+          // If all test cases are passed for the first time, update solved problems
+          if (
+            submissionData.testCasesPassed === submissionData.totalTestCases &&
+            !currentUser.solvedProblems.includes(submissionData.challengeId)
+          ) {
+            updatedUserData.solvedProblems = [
+              ...currentUser.solvedProblems,
+              submissionData.challengeId,
+            ];
+          }
+
+          await userService.updateUser(user.id, updatedUserData);
+        }
+      }
+
+      // 6. Create the new submission record
+      const submissionId = await submissionService.createSubmission(
+        user.id,
+        submissionData.challengeId,
+        {
+          ...submissionData,
+          points: pointsToAdd,
+        }
+      );
+
+      // Refetch submissions for the UI
+      getChallengeSubmissions(submissionData.challengeId);
+
       return submissionId;
     } catch (err) {
       const errorMessage =
@@ -74,7 +117,11 @@ export const useSubmissions = () => {
     try {
       setLoading(true);
       setError(null);
-      return await submissionService.getChallengeSubmissions(challengeId);
+      const fetchedSubmissions =
+        await submissionService.getChallengeSubmissions(challengeId);
+      console.log("fetchedSubmissions", fetchedSubmissions);
+
+      setSubmissions(fetchedSubmissions);
     } catch (err) {
       const errorMessage =
         err instanceof Error
@@ -116,11 +163,12 @@ export const useSubmissions = () => {
   };
 
   return {
-    loading,
-    error,
     createSubmission,
     getUserSubmissions,
     getChallengeSubmissions,
     getUserChallengeSubmission,
+    submissions,
+    loading,
+    error,
   };
 };

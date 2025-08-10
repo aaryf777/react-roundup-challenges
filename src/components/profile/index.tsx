@@ -2,15 +2,29 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Tooltip as ShadcnTooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   BarChart,
   Bar,
   XAxis,
   YAxis,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   CartesianGrid,
 } from "recharts";
-import { Zap, Target, Flame, Trophy } from "lucide-react";
+import {
+  Zap,
+  Target,
+  Flame,
+  Trophy,
+  Star,
+  CheckCircle,
+  Send,
+} from "lucide-react";
 
 interface ProfileProps {
   user: {
@@ -18,12 +32,26 @@ interface ProfileProps {
     email: string;
     joinDate: string;
     totalProblemsSolved: number;
+    points: number;
     currentStreak: number;
     longestStreak: number;
+    totalSubmissions: number;
+    acceptedSubmissions: number;
+    acceptanceRate: number;
     problemsByDifficulty: {
       easy: number;
       medium: number;
       hard: number;
+    };
+    totalChallengesByDifficulty: {
+      easy: number;
+      medium: number;
+      hard: number;
+    };
+    solvedByCategory: {
+      easy: Record<string, number>;
+      medium: Record<string, number>;
+      hard: Record<string, number>;
     };
   };
   chartData: { date: string; solved: number }[];
@@ -39,30 +67,47 @@ const Profile = ({
   setTimeFilter,
   timeFilterOptions,
 }: ProfileProps) => {
-  const totalProblemsSolved =
-    user.problemsByDifficulty.easy +
-    user.problemsByDifficulty.medium +
-    user.problemsByDifficulty.hard;
+  const DifficultyInfo: React.FC<{
+    title: string;
+    solved: number;
+    color: string;
+    categoryData: Record<string, number>;
+  }> = ({ title, solved, color, categoryData }) => {
+    return (
+      <TooltipProvider>
+        <ShadcnTooltip>
+          <TooltipTrigger asChild>
+            <div className={`text-center p-4 bg-${color}-50 rounded-lg`}>
+              <Badge className={`bg-${color}-500 mb-2`}>{title}</Badge>
+              <p className={`text-2xl font-bold text-${color}-600`}>{solved}</p>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p className="font-bold mb-1">Solved by Category:</p>
+            {Object.entries(categoryData).map(([cat, num]) => (
+              <p key={cat} className="text-sm">
+                {cat}: {num}
+              </p>
+            ))}
+          </TooltipContent>
+        </ShadcnTooltip>
+      </TooltipProvider>
+    );
+  };
 
   return (
     <div className="container max-w-4xl py-12">
       <div className="space-y-8">
         {/* Profile Header */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Profile</CardTitle>
-          </CardHeader>
           <CardContent>
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center space-x-4 pt-6">
               <div className="w-20 h-20 bg-gradient-primary rounded-full flex items-center justify-center text-white text-2xl font-bold">
                 {user.username.charAt(0).toUpperCase()}
               </div>
               <div>
                 <h2 className="text-xl font-semibold">{user.username}</h2>
                 <p className="text-muted-foreground">{user.email}</p>
-                <p className="text-sm text-muted-foreground">
-                  Joined {new Date(user.joinDate).toLocaleDateString()}
-                </p>
               </div>
             </div>
           </CardContent>
@@ -76,7 +121,19 @@ const Profile = ({
                 <Trophy className="h-5 w-5 text-yellow-500" />
                 <span className="text-sm font-medium">Total Solved</span>
               </div>
-              <p className="text-2xl font-bold mt-2">{totalProblemsSolved}</p>
+              <p className="text-2xl font-bold mt-2">
+                {user.totalProblemsSolved}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center space-x-2">
+                <Star className="h-5 w-5 text-indigo-500" />
+                <span className="text-sm font-medium">Points</span>
+              </div>
+              <p className="text-2xl font-bold mt-2">{user.points}</p>
             </CardContent>
           </Card>
 
@@ -84,7 +141,7 @@ const Profile = ({
             <CardContent className="p-6">
               <div className="flex items-center space-x-2">
                 <Flame className="h-5 w-5 text-orange-500" />
-                <span className="text-sm font-medium">Current Streak</span>
+                <span className="text-sm font-medium">Streak</span>
               </div>
               <p className="text-2xl font-bold mt-2">
                 {user.currentStreak} days
@@ -95,22 +152,14 @@ const Profile = ({
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center space-x-2">
-                <Zap className="h-5 w-5 text-blue-500" />
-                <span className="text-sm font-medium">Longest Streak</span>
-              </div>
-              <p className="text-2xl font-bold mt-2">
-                {user.longestStreak} days
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardContent className="p-6">
-              <div className="flex items-center space-x-2">
                 <Target className="h-5 w-5 text-green-500" />
-                <span className="text-sm font-medium">Success Rate</span>
+                <span className="text-sm font-medium">Acceptance Rate</span>
               </div>
-              <p className="text-2xl font-bold mt-2">87%</p>
+              <div className="flex items-center space-x-2">
+                <p className="text-2xl font-bold mt-2">
+                  {user.acceptanceRate}%
+                </p>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -122,65 +171,82 @@ const Profile = ({
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-              <div className="text-center p-4 bg-green-50 rounded-lg">
-                <Badge className="bg-green-500 mb-2">Easy</Badge>
-                <p className="text-2xl font-bold text-green-600">
-                  {user.problemsByDifficulty.easy}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {Math.round(
-                    (user.problemsByDifficulty.easy / totalProblemsSolved) * 100
-                  )}
-                  %
-                </p>
-              </div>
-              <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                <Badge className="bg-yellow-500 mb-2">Medium</Badge>
-                <p className="text-2xl font-bold text-yellow-600">
-                  {user.problemsByDifficulty.medium}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {Math.round(
-                    (user.problemsByDifficulty.medium / totalProblemsSolved) *
-                      100
-                  )}
-                  %
-                </p>
-              </div>
-              <div className="text-center p-4 bg-red-50 rounded-lg">
-                <Badge className="bg-red-500 mb-2">Hard</Badge>
-                <p className="text-2xl font-bold text-red-600">
-                  {user.problemsByDifficulty.hard}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {Math.round(
-                    (user.problemsByDifficulty.hard / totalProblemsSolved) * 100
-                  )}
-                  %
-                </p>
-              </div>
+              <DifficultyInfo
+                title="Easy"
+                solved={user.problemsByDifficulty.easy}
+                color="green"
+                categoryData={user.solvedByCategory.easy}
+              />
+              <DifficultyInfo
+                title="Medium"
+                solved={user.problemsByDifficulty.medium}
+                color="yellow"
+                categoryData={user.solvedByCategory.medium}
+              />
+              <DifficultyInfo
+                title="Hard"
+                solved={user.problemsByDifficulty.hard}
+                color="red"
+                categoryData={user.solvedByCategory.hard}
+              />
             </div>
 
             {/* Progress Bar */}
-            <div className="w-full bg-gray-200 rounded-full h-2">
-              <div
-                className="bg-green-500 h-2 rounded-full"
-                style={{
-                  width: `${(user.problemsByDifficulty.easy / totalProblemsSolved) * 100}%`,
-                }}
-              ></div>
-              <div
-                className="bg-yellow-500 h-2 rounded-full -mt-2"
-                style={{
-                  width: `${(user.problemsByDifficulty.medium / totalProblemsSolved) * 100}%`,
-                }}
-              ></div>
-              <div
-                className="bg-red-500 h-2 rounded-full -mt-2"
-                style={{
-                  width: `${(user.problemsByDifficulty.hard / totalProblemsSolved) * 100}%`,
-                }}
-              ></div>
+            <div className="w-full bg-gray-200 rounded-full h-4 flex overflow-hidden">
+              <TooltipProvider>
+                <ShadcnTooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="bg-green-500 h-full"
+                      style={{
+                        width: `${user.totalChallengesByDifficulty.easy > 0 ? (user.problemsByDifficulty.easy / user.totalChallengesByDifficulty.easy) * 100 : 0}%`,
+                      }}
+                    ></div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Easy: {user.problemsByDifficulty.easy} /{" "}
+                      {user.totalChallengesByDifficulty.easy}
+                    </p>
+                  </TooltipContent>
+                </ShadcnTooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <ShadcnTooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="bg-yellow-500 h-full"
+                      style={{
+                        width: `${user.totalChallengesByDifficulty.medium > 0 ? (user.problemsByDifficulty.medium / user.totalChallengesByDifficulty.medium) * 100 : 0}%`,
+                      }}
+                    ></div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Medium: {user.problemsByDifficulty.medium} /{" "}
+                      {user.totalChallengesByDifficulty.medium}
+                    </p>
+                  </TooltipContent>
+                </ShadcnTooltip>
+              </TooltipProvider>
+              <TooltipProvider>
+                <ShadcnTooltip>
+                  <TooltipTrigger asChild>
+                    <div
+                      className="bg-red-500 h-full"
+                      style={{
+                        width: `${user.totalChallengesByDifficulty.hard > 0 ? (user.problemsByDifficulty.hard / user.totalChallengesByDifficulty.hard) * 100 : 0}%`,
+                      }}
+                    ></div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Hard: {user.problemsByDifficulty.hard} /{" "}
+                      {user.totalChallengesByDifficulty.hard}
+                    </p>
+                  </TooltipContent>
+                </ShadcnTooltip>
+              </TooltipProvider>
             </div>
           </CardContent>
         </Card>
@@ -222,7 +288,10 @@ const Profile = ({
                   }
                 />
                 <YAxis />
-                <Tooltip />
+                <RechartsTooltip
+                  contentStyle={{ background: "#1f2937", border: "none" }}
+                  labelStyle={{ color: "#f9fafb" }}
+                />
                 <Bar dataKey="solved" fill="#3b82f6" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

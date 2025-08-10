@@ -184,3 +184,22 @@ All colors MUST be HSL.
 *::-webkit-scrollbar {
   display: none; /* Chrome, Safari and Opera */
 }
+@layer base {
+  /* Dark theme code blocks */
+  .dark .prose code {
+    background-color: #ffffff12;
+    border: 1px solid #f7faff1f;
+    color: #eff1f6bf;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+
+  /* Light theme code blocks */
+  .prose code {
+    background-color: #0000000d;
+    border: 1px solid #0000001a;
+    color: #000000b3;
+    padding: 2px 4px;
+    border-radius: 4px;
+  }
+}
