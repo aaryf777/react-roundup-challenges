@@ -8,6 +8,7 @@ import StatusFilter from "@/components/filters/StatusFilter";
 import { useChallenges } from "@/contexts/ChallengesContext";
 import { COMPANY_LIST, SORT_OPTIONS } from "@/constants/challenges";
 import type { ChallengesSectionProps } from "./type";
+import { SearchX } from "lucide-react";
 
 const ChallengesSection = ({
   onChallengeClick,
@@ -88,10 +89,24 @@ const ChallengesSection = ({
             </div>
 
             {/* Challenge Cards */}
-            <ChallengeGrid
-              visibleChallenges={visibleChallenges}
-              handleChallengeClick={(challenge) => onChallengeClick(challenge.id)}
-            />
+            {visibleChallenges.length > 0 ? (
+              <ChallengeGrid
+                visibleChallenges={visibleChallenges}
+                handleChallengeClick={(challenge) =>
+                  onChallengeClick(challenge.id)
+                }
+              />
+            ) : (
+              <div className="text-center py-12">
+                <SearchX className="mx-auto h-12 w-12 text-muted-foreground" />
+                <h3 className="text-xl font-semibold mt-4">
+                  No Challenges Found
+                </h3>
+                <p className="text-muted-foreground mt-2">
+                  Try adjusting your filters or search query.
+                </p>
+              </div>
+            )}
 
             {/* Load More Button */}
             {hasMore && (

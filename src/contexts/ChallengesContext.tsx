@@ -41,6 +41,8 @@ export interface Challenge {
   content: string;
   hints: string[];
   functionName: string;
+  options?: { id: string; text: string; isCorrect: boolean }[];
+  explanation?: string;
 }
 
 export interface Category {
@@ -236,8 +238,8 @@ export const ChallengesProvider = ({ children }: ChallengesProviderProps) => {
   const filteredChallenges = allChallenges.filter((challenge) => {
     const matchesCategory =
       state.selectedCategory === "all" ||
-      challenge.category.toLowerCase().replace(/\s+/g, "-") ===
-        state.selectedCategory;
+      challenge.category.toLowerCase() === state.selectedCategory.toLowerCase();
+
     const matchesDifficulty =
       state.difficultyFilter === "all" ||
       challenge.difficulty === state.difficultyFilter;

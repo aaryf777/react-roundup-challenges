@@ -36,6 +36,8 @@ const ChallengePageContainer = () => {
                 ? challengeData.testCases
                 : challengeData.testCases,
             testRunner: challengeData.testRunner, // Ensure this is passed through
+            options: challengeData.options, // Pass MCQ options
+            explanation: challengeData.explanation, // Pass MCQ explanation
           };
           setChallenge(transformedChallenge as Challenge);
         } else {

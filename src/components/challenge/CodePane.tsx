@@ -1,5 +1,6 @@
-import CodeEditor from './CodeEditor';
-import { Challenge } from './type';
+import CodeEditor from "./CodeEditor";
+import MCQChallenge from "./MCQChallenge";
+import { Challenge } from "../../contexts/ChallengesContext";
 
 interface CodePaneProps {
   challenge: Challenge;
@@ -8,7 +9,22 @@ interface CodePaneProps {
   onSubmit: (submissionData: any) => Promise<void>;
 }
 
-const CodePane = ({ challenge, code, onCodeChange, onSubmit }: CodePaneProps) => {
+const CodePane = ({
+  challenge,
+  code,
+  onCodeChange,
+  onSubmit,
+}: CodePaneProps) => {
+  // Check if this is an MCQ challenge
+  const isMCQChallenge =
+    challenge.category === "MCQ" ||
+    challenge.tags?.includes("MCQ") ||
+    challenge.tags?.some((tag) => tag.toLowerCase() === "mcq");
+
+  if (isMCQChallenge) {
+    return <MCQChallenge challenge={challenge} onSubmit={onSubmit} />;
+  }
+
   return (
     <CodeEditor
       challenge={challenge}

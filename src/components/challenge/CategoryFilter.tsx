@@ -7,7 +7,7 @@ import { LayoutGrid, Code, BrainCircuit } from "lucide-react";
 interface CategoryFilterProps {
   categories: Category[];
   selectedCategory: string;
-  onCategoryChange: (categoryId: string) => void;
+  onCategoryChange: (categoryName: string) => void;
 }
 
 const getCategoryIcon = (categoryName: string) => {
@@ -48,12 +48,12 @@ const CategoryFilter = ({
         {categories.map((category) => (
           <Button
             key={category.id}
-            variant={selectedCategory === category.id ? "default" : "ghost"}
+            variant={selectedCategory === category.name ? "default" : "ghost"}
             className={cn(
               "w-full justify-start h-auto p-3",
-              selectedCategory === category.id && "bg-gradient-primary"
+              selectedCategory === category.name && "bg-gradient-primary"
             )}
-            onClick={() => onCategoryChange(category.id)}
+            onClick={() => onCategoryChange(category.name)}
           >
             <span className="flex-1 text-left">{category.name}</span>
             <span className="mr-2">{getCategoryIcon(category.name)}</span>
